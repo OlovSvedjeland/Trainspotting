@@ -7,6 +7,7 @@ public class Lab1 {
 
     try {
       tsi.setSpeed(1,speed1);
+      tsi.setSpeed(2,speed2);
     }
     catch (CommandException e) {
       e.printStackTrace();    // or only e.getMessage() for the error

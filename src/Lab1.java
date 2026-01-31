@@ -13,7 +13,7 @@ import TSim.*;
 // How does a train know when to slow down, change tracks, stop etc. etc. Through semaphores, but how.
 
 // semaphore.tryAquire might be useful. semaphore.acquire blocks if no permit is available.
-// Should the semaphores control certain switches?
+// Should the semaphores control certain switches? One semaphore per switch at least?
 
 public class Lab1 {
 
@@ -39,7 +39,7 @@ public class Lab1 {
         } catch (CommandException e) {
           throw new RuntimeException(e);
         } catch (InterruptedException e) {
-          throw new RuntimeException(e);
+            throw new RuntimeException(e);
         }
       }
     }

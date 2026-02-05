@@ -5,35 +5,14 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 
-// Use semaphores to "lock" tracks so that the trains never occupy the same track, be it parallel or singular.
-// If a part of track is locked, and it has a parallel track, use that one.
-// Every part of the track that leads to a station should be represented by a semaphore.
-// The trains should recognize the semaphore and (in case of station tracks) continue forward.
-// Should every switch return to original state when a train has passed?
-
-// Problems:
-// Trains go towards the same station, a faster train should be able to overtake a slower one.
-// If a critical rail (station rail for example) is occupied, other train should account for this.
-// Solve for large speed differences, especially regarding the parallel tracks. Minimum max-speed = 15.
-// How does a train know when to slow down, change tracks, stop etc. etc. Through semaphores, but how.
-
-// semaphore.tryAquire might be useful. semaphore.acquire blocks if no permit is available.
-// Should the semaphores control certain switches? One semaphore per switch at least? Sensors have one or several
-// semaphores connected, depending on which are available for it to access.
-
-// Something weird with the switching: The trains had their directions inverted to how they actually travel, FIXED
-// The switches directions are sometimes inverted to their actual dir. Might be a map problem? Or switch method problem?
-// Sometimes when the terminal says that a RIGHT switch is performed, a LEFT switch is instead performed.
-// And sometimes nothing happens at all.
-
 public class Lab1 {
 
     public TSimInterface tsi = TSimInterface.getInstance();
-    Map<Point, List<Semaphore>> semaphoreMap;
+    Map<Point, List<Semaphore>> downSemMap;
     Map<Point, List<Semaphore>> upSemMap;
     Map<Point, SwitchCmd> switchMap;
     Set<Point> stationSensors;
-    Set<Point> upReleaseSensors;
+    Semaphore semI = new Semaphore(1);
 
     public Point getSensorPoint(SensorEvent e) {
         return new Point(e.getXpos(), e.getYpos());
@@ -45,13 +24,12 @@ public class Lab1 {
 
     public Lab1(int speed1, int speed2) {
 
-        this.semaphoreMap = new HashMap<>();
+        this.downSemMap = new HashMap<>();
         this.upSemMap = new HashMap<>();
         this.switchMap = new HashMap<>();
         this.stationSensors = new HashSet<>();
-        this.upReleaseSensors = new HashSet<>();
 
-        TrackBuilder.build(semaphoreMap, switchMap, stationSensors, upReleaseSensors, upSemMap);
+        TrackBuilder.build(downSemMap, switchMap, stationSensors, upSemMap, semI);
 
         try {
             tsi.setSpeed(1, speed1);
@@ -61,7 +39,6 @@ public class Lab1 {
             System.exit(1);
         }
 
-        // Minns ej vilket tåg som var vilket????
         Thread trainA = new Thread(new TrainController(1, speed1, TrainDirection.DOWN));
         Thread trainB = new Thread(new TrainController(2, speed2, TrainDirection.UP));
 
@@ -73,25 +50,20 @@ public class Lab1 {
         int id;
         int speed;
         TrainDirection trainDirection;
-        Stack<Semaphore> semStack;
         Queue<Semaphore> semQueue;
 
         TrainController(int id, int speed, TrainDirection trainDirection) {
             this.id = id;
             this.speed = speed;
             this.trainDirection = trainDirection;
-            this.semStack = new Stack<>();
             this.semQueue = new LinkedList<>();
         }
 
         public void sleepAndTurn() throws RuntimeException, CommandException {
-
-            int tempSpeed = speed;
-            System.out.println("sleeeeep and tuuuuurn");
             tsi.setSpeed(id, 0);
 
             try {
-                Thread.sleep(1000 + (20 * Math.abs(tempSpeed)));
+                Thread.sleep(1000 + (20 * Math.abs(speed)));
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -101,7 +73,8 @@ public class Lab1 {
             } else {
                 trainDirection = TrainDirection.UP;
             }
-            tsi.setSpeed(id, -tempSpeed);
+            speed = -speed;
+            tsi.setSpeed(id, speed);
         }
 
         public void run() {
@@ -118,53 +91,49 @@ public class Lab1 {
                             continue;
                         }
 
+                            maybeRelease(sensPoint);
+
                             List<Semaphore> semaphores;
 
                             if (trainDirection == TrainDirection.DOWN) {
-                                System.out.println("Train Direction = DOWN");
-                                semaphores = semaphoreMap.get(sensPoint);
+                                semaphores = downSemMap.get(sensPoint);
                             } else {
-                                System.out.println("Train Direction = DOWN");
                                 semaphores = upSemMap.get(sensPoint);
                             }
 
                             if (semaphores == null || semaphores.isEmpty()) {
-                                // throw new RuntimeException("missing semaphore");
                                 continue;
                             }
 
                             SwitchCmd switchCmd = switchMap.get(sensPoint);
-                            if (switchCmd == null) {
-                                throw new RuntimeException("missing switchCmd");
-                            }
 
-                            tsi.setSpeed(id, 0);
-
-                            if (semaphores.get(0).tryAcquire()) {
-                                int availableSem = semaphores.get(0).availablePermits();
-                                System.out.println(availableSem);
+                            if (semaphores.size() == 1) {
+                                Semaphore sem = semaphores.get(0);
+                                tsi.setSpeed(id, 0);
+                                sem.acquire();
+                                if (switchCmd != null) {
+                                    tsi.setSwitch(switchCmd.x, switchCmd.y, switchCmd.dir);
+                                }
                                 tsi.setSpeed(id, speed);
-                                tsi.setSwitch(switchCmd.x, switchCmd.y, switchCmd.dir);
-                                semQueue.add(semaphores.get(0)); // was getFirst()
-
-                            } else if (semaphores.size() > 1) {
-                                semaphores.get(1).acquire();
-                                SwitchCmd.tryOtherDir(tsi, switchCmd.dir, switchCmd);
+                                semQueue.add(sem);
+                            }
+                            if (semaphores.size() == 2 && semaphores.get(0).availablePermits() == 1) {
+                                Semaphore sem = semaphores.get(0);
+                                sem.acquire();
+                                if(switchCmd != null) {
+                                    tsi.setSwitch(switchCmd.x, switchCmd.y, switchCmd.dir);
+                                }
                                 tsi.setSpeed(id, speed);
-                                semQueue.add(semaphores.get(1));
+                                semQueue.add(sem);
+                            } else if (semaphores.size() == 2 && semaphores.get(0).availablePermits() == 0) {
+                                Semaphore sem = semaphores.get(1);
+                                sem.acquire();
+                                if (switchCmd != null) {
+                                    SwitchCmd.tryOtherDir(tsi, switchCmd.dir, switchCmd);
+                                }
+                                tsi.setSpeed(id, speed);
+                                semQueue.add(sem);
                             }
-
-
-                            if ((isUpReleaseSensor(sensPoint) && trainDirection == TrainDirection.UP)
-                                    || (!isUpReleaseSensor(sensPoint) && trainDirection == TrainDirection.DOWN)) {
-                                Semaphore sem = semQueue.remove();
-                                sem.release();
-                            }
-
-
-
-                            int availableSem = semaphores.get(0).availablePermits();
-                            System.out.println(availableSem);
                     }
                 } catch (CommandException e) {
                     throw new RuntimeException(e);
@@ -174,14 +143,33 @@ public class Lab1 {
             }
         }
 
-        public void release(TrainDirection trainDirection, Point sensor) {
-            switch (trainDirection) {
-                // TODO
-            }
-        }
+        public void maybeRelease(Point sensPoint) {
 
-        boolean isUpReleaseSensor(Point sensPoint) {
-            return upReleaseSensors.contains(sensPoint);
+            List<Semaphore> sems;
+            if (trainDirection == TrainDirection.UP) {
+                sems = downSemMap.get(sensPoint);
+            } else sems = upSemMap.get(sensPoint);
+
+            if (sems == null || sems.isEmpty() || semQueue.isEmpty()) {
+                return;
+            }
+
+            if (sems.contains(semI)) {
+                if(semQueue.remove(semI)) {
+                    semQueue.remove(semI);
+                    semI.release();
+                }
+                return;
+            }
+
+            Semaphore relevantSem = semQueue.peek();
+
+            if (sems.contains(relevantSem)) {
+                semQueue.remove();
+                if(relevantSem != null) {
+                    relevantSem.release();
+                }
+            }
         }
     }
 
@@ -205,10 +193,9 @@ public class Lab1 {
 
     static class TrackBuilder {
 
-        static void build(Map<Point, List<Semaphore>> semaphoreMap,
+        static void build(Map<Point, List<Semaphore>> downSemMap,
                           Map<Point, SwitchCmd> switchMap,
-                          Set<Point> stationSensors,
-                          Set<Point> upReleaseSensor, Map<Point, List<Semaphore>> upSemMap) {
+                          Set<Point> stationSensors, Map<Point, List<Semaphore>> upSemMap, Semaphore semI) {
 
             Semaphore semA = new Semaphore(1);
             Semaphore semB = new Semaphore(1);
@@ -218,107 +205,91 @@ public class Lab1 {
             Semaphore semF = new Semaphore(1);
             Semaphore semG = new Semaphore(1);
             Semaphore semH = new Semaphore(1);
-            Semaphore semI = new Semaphore(1);
 
+            // non-station ensors
             Point pointA1 = new Point(6, 7);
             Point pointA2 = new Point(10, 7);
-            Point pointA3 = new Point(15, 7);
+            Point pointA3 = new Point(14, 7);
 
             Point pointB1 = new Point(8, 5);
-            Point pointB2 = new Point(9, 8);
-            Point pointB3 = new Point(16, 8);
+            Point pointB2 = new Point(10, 8);
+            Point pointB3 = new Point(15, 8);
 
             Point pointC1 = new Point(19, 9);
             Point pointC2 = new Point(18,9);
 
-            Point pointD1 = new Point(13, 9);
-            Point pointD2 = new Point(6, 9);
+            Point pointD1 = new Point(12, 9);
+            Point pointD2 = new Point(7, 9);
 
-            Point pointE1 = new Point(14, 10);
-            Point pointE2 = new Point(5, 10);
+            Point pointE1 = new Point(13, 10);
+            Point pointE2 = new Point(6, 10);
 
             Point pointF1 = new Point(1, 9);
             Point pointF2 = new Point(1,10);
 
-            Point pointG1 = new Point(5, 11);
+            Point pointG1 = new Point(6, 11);
 
-            Point pointH1 = new Point(3, 13);
+            Point pointH1 = new Point(4, 13);
 
-            // DOWNMAP
-            // förgrening 1
-            semaphoreMap.put(pointB3, List.of(semC));
-            semaphoreMap.put(pointA3, List.of(semC));
-            // förgrening 2
-            semaphoreMap.put(pointC1, List.of(semD, semE));
-            // förgrening 3
-            semaphoreMap.put(pointD2, List.of(semF));
-            semaphoreMap.put(pointE2, List.of(semF));
-            // förgrening 4
-            semaphoreMap.put(pointF1, List.of(semG, semH));
-            semaphoreMap.put(pointG1, List.of(semF));
-            semaphoreMap.put(pointH1, List.of(semF));
+            // branchA (17,7)
+            downSemMap.put(pointB3, List.of(semC));
+            downSemMap.put(pointA3, List.of(semC));
+            // branchB (15,9)
+            downSemMap.put(pointC2, List.of(semD, semE));
+            // branchC (4,9)
+            downSemMap.put(pointD2, List.of(semF));
+            downSemMap.put(pointE2, List.of(semF));
+            // branchD (3,11)
+            downSemMap.put(pointF2, List.of(semG, semH));
+            // crossroads
+            downSemMap.put(pointB1, List.of(semI));
+            downSemMap.put(pointA1, List.of(semI));
 
-            // UPMAP
             upSemMap.put(pointH1, List.of(semF));
             upSemMap.put(pointG1, List.of(semF));
             upSemMap.put(pointF1, List.of(semD, semE));
             upSemMap.put(pointD1, List.of(semC));
             upSemMap.put(pointE1, List.of(semC));
             upSemMap.put(pointC1, List.of(semA, semB));
-
-
+            // crossroads
+            upSemMap.put(pointB2, List.of(semI));
+            upSemMap.put(pointA2, List.of(semI));
 
             // switches
-            SwitchCmd branchA = new SwitchCmd(17, 7, 0x02);
-            SwitchCmd branchB = new SwitchCmd(15, 9, 0x02);
-            SwitchCmd branchC = new SwitchCmd(4, 9, 0x01);
-            SwitchCmd branchD = new SwitchCmd(3, 11, 0x01);
+            SwitchCmd branchA_right = new SwitchCmd(17, 7, 0x02);
+            SwitchCmd branchA_left = new SwitchCmd(17, 7, 0x01);
+            SwitchCmd branchB_right = new SwitchCmd(15, 9, 0x02);
+            SwitchCmd branchB_left = new SwitchCmd(15, 9, 0x01);
+            SwitchCmd branchC_right = new SwitchCmd(4, 9, 0x02);
+            SwitchCmd branchC_left = new SwitchCmd(4, 9, 0x01);
+            SwitchCmd branchD_right = new SwitchCmd(3, 11, 0x02);
+            SwitchCmd branchD_left = new SwitchCmd(3, 11, 0x01);
 
-            // Förgrening 1, branchA (17,7)
-            switchMap.put(pointA3, branchA);
-            switchMap.put(pointB3, branchA);
-            switchMap.put(pointC1, branchA);
+            // branchA (17,7)
+            switchMap.put(pointA3, branchA_right);
+            switchMap.put(pointB3, branchA_left);
+            switchMap.put(pointC1, branchA_right);
 
-            // Förgrening 2 → branchB (15,9)
-            switchMap.put(pointC2, branchB);
-            switchMap.put(pointD1, branchB);
-            switchMap.put(pointE1, branchB);
+            // branchB (15,9)
+            switchMap.put(pointC2, branchB_right);
+            switchMap.put(pointD1, branchB_right);
+            switchMap.put(pointE1, branchB_left);
 
-            // Förgrening 3, branchC (4,9)
-            switchMap.put(pointD2, branchC);
-            switchMap.put(pointE2, branchC);
-            switchMap.put(pointF1, branchC);
+            // branchC (4,9)
+            switchMap.put(pointD2, branchC_left);
+            switchMap.put(pointE2, branchC_right);
+            switchMap.put(pointF1, branchC_left);
 
-            // Förgrening 4, branchD (3,11)
-            switchMap.put(pointF2, branchD);
-            switchMap.put(pointG1, branchD);
-            switchMap.put(pointH1, branchD);
+            // branchD (3,11)
+            switchMap.put(pointF2, branchD_left);
+            switchMap.put(pointG1, branchD_left);
+            switchMap.put(pointH1, branchD_right);
 
             // stationSensors - up / down
             stationSensors.add(new Point(15, 3));
             stationSensors.add(new Point(15, 5));
             stationSensors.add(new Point(15, 11));
             stationSensors.add(new Point(15, 13));
-
-            upReleaseSensor.add(pointF1);
-            upReleaseSensor.add(pointD2);
-            upReleaseSensor.add(pointE2);
-            upReleaseSensor.add(pointC1);
-            upReleaseSensor.add(pointA3);
-            upReleaseSensor.add(pointB3);
-            upReleaseSensor.add(pointA1);
-            upReleaseSensor.add(pointB1);
-
-            /*
-            upReleaseSensor.add(new Point(15, 3));
-            upReleaseSensor.add(new Point(15, 5));
-            upReleaseSensor.add(new Point(15, 11));
-            upReleaseSensor.add(new Point(15, 13));
-            upReleaseSensor.add(new Point(15, 3));
-            upReleaseSensor.add(new Point(15, 3));
-            upReleaseSensor.add(new Point(15, 3));
-            upReleaseSensor.add(new Point(15, 3));
-            */
         }
     }
 }

@@ -79,10 +79,31 @@ public class Lab1 {
 
         public void run() {
 
+
+
             while (true) {
                 try {
                     SensorEvent sensorEvent = tsi.getSensor(id); // Get sensorEvent
                     Point sensPoint = getSensorPoint(sensorEvent); // Get point of sensor for event
+
+
+                    if (sensorEvent.getStatus() == 0x02 && stationSensors.contains(sensPoint)) {
+                        List<Semaphore> semaphores;
+                        if (trainDirection == TrainDirection.DOWN) { // Use different maps for acquiring/release
+                            semaphores = downSemMap.get(sensPoint); // dependent on direction
+                        } else {
+                            semaphores = upSemMap.get(sensPoint);
+                        }
+                        Semaphore sem = semaphores.get(0);
+                        if (sem.tryAcquire()) {
+                            semQueue.add(sem);
+                        }
+                        tsi.setSpeed(id, speed);
+
+                        continue;
+                    }
+
+
 
                     if (sensorEvent.getStatus() == 0x01) { // If sensor = ACTIVE
 
@@ -208,7 +229,7 @@ public class Lab1 {
             Semaphore semH = new Semaphore(1);
 
             // non-station sensors
-            Point pointA1 = new Point(6, 7);
+            Point pointA1 = new Point(6, 3);
             Point pointA2 = new Point(10, 7);
             Point pointA3 = new Point(14, 7);
 
@@ -232,6 +253,12 @@ public class Lab1 {
 
             Point pointH1 = new Point(4, 13);
 
+            // station sensors
+            Point stationSensorA1 = new Point(15, 3);
+            Point stationSensorA2 = new Point(15, 5);
+            Point stationSensorB1 = new Point(15, 11);
+            Point stationSensorB2 = new Point(15, 13);
+
             //What semaphores to use depending on direction of train:
 
             // DOWN
@@ -248,6 +275,9 @@ public class Lab1 {
             // crossroads
             downSemMap.put(pointB1, List.of(semI));
             downSemMap.put(pointA1, List.of(semI));
+            //station
+            downSemMap.put(stationSensorA1, List.of(semA));
+            downSemMap.put(stationSensorA2, List.of(semB));
 
             // UP
             // branchD (3,11)
@@ -260,10 +290,13 @@ public class Lab1 {
             upSemMap.put(pointE1, List.of(semC));
             // branchA (17,7)
             upSemMap.put(pointC1, List.of(semA, semB));
-
             // crossroads
             upSemMap.put(pointB2, List.of(semI));
             upSemMap.put(pointA2, List.of(semI));
+            // stationsensors
+            upSemMap.put(stationSensorB1, List.of(semG));
+            upSemMap.put(stationSensorB2, List.of(semH));
+
 
             // switches
             SwitchCmd branchA_right = new SwitchCmd(17, 7, 0x02);
@@ -295,11 +328,13 @@ public class Lab1 {
             switchMap.put(pointG1, branchD_left);
             switchMap.put(pointH1, branchD_right);
 
+
             // stationSensors - up / down
-            stationSensors.add(new Point(15, 3));
-            stationSensors.add(new Point(15, 5));
-            stationSensors.add(new Point(15, 11));
-            stationSensors.add(new Point(15, 13));
+            stationSensors.add(stationSensorA1);
+            stationSensors.add(stationSensorA2);
+            stationSensors.add(stationSensorB1);
+            stationSensors.add(stationSensorB2);
+
         }
     }
 }

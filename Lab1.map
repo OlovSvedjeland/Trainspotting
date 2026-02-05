@@ -17,11 +17,11 @@ R 5 9 1 HorizontalRail NoSensor
 R 5 10 1 HorizontalRail NoSensor
 R 5 11 1 HorizontalRail NoSensor
 R 5 13 1 HorizontalRail NoSensor
-R 6 3 1 DownRightRail NoSensor
+R 6 3 1 DownRightRail Sensor
 R 6 4 1 VerticalRail NoSensor
 R 6 5 1 VerticalRail NoSensor
 R 6 6 1 VerticalRail NoSensor
-R 6 7 1 UpRightRail Sensor
+R 6 7 1 UpRightRail NoSensor
 R 6 9 1 HorizontalRail NoSensor
 R 6 10 1 HorizontalRail Sensor
 R 6 11 1 HorizontalRail Sensor

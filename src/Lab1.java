@@ -81,22 +81,22 @@ public class Lab1 {
 
             while (true) {
                 try {
-                    SensorEvent sensorEvent = tsi.getSensor(id);
-                    Point sensPoint = getSensorPoint(sensorEvent);
+                    SensorEvent sensorEvent = tsi.getSensor(id); // Get sensorEvent
+                    Point sensPoint = getSensorPoint(sensorEvent); // Get point of sensor for event
 
-                    if (sensorEvent.getStatus() == 0x01) {
+                    if (sensorEvent.getStatus() == 0x01) { // If sensor = ACTIVE
 
                         if (stationSensors.contains(sensPoint)) {
                             sleepAndTurn();
                             continue;
                         }
 
-                            maybeRelease(sensPoint);
+                            maybeRelease(sensPoint); // Conditional release of semaphores
 
                             List<Semaphore> semaphores;
 
-                            if (trainDirection == TrainDirection.DOWN) {
-                                semaphores = downSemMap.get(sensPoint);
+                            if (trainDirection == TrainDirection.DOWN) { // Use different maps for acquiring/release
+                                semaphores = downSemMap.get(sensPoint); // dependent on direction
                             } else {
                                 semaphores = upSemMap.get(sensPoint);
                             }
@@ -105,8 +105,8 @@ public class Lab1 {
                                 continue;
                             }
 
-                            SwitchCmd switchCmd = switchMap.get(sensPoint);
-
+                            SwitchCmd switchCmd = switchMap.get(sensPoint); // Default state of points switch
+                            // If 1 semaphore possible, set speed 0 and acquire
                             if (semaphores.size() == 1) {
                                 Semaphore sem = semaphores.get(0);
                                 tsi.setSpeed(id, 0);
@@ -115,23 +115,23 @@ public class Lab1 {
                                     tsi.setSwitch(switchCmd.x, switchCmd.y, switchCmd.dir);
                                 }
                                 tsi.setSpeed(id, speed);
-                                semQueue.add(sem);
+                                semQueue.add(sem); // Add acquired to queue
                             }
+                            // If two semaphores possible, first has permit, acquire
                             if (semaphores.size() == 2 && semaphores.get(0).availablePermits() == 1) {
                                 Semaphore sem = semaphores.get(0);
                                 sem.acquire();
                                 if(switchCmd != null) {
                                     tsi.setSwitch(switchCmd.x, switchCmd.y, switchCmd.dir);
                                 }
-                                tsi.setSpeed(id, speed);
                                 semQueue.add(sem);
+                                // If two semaphores possible, second has permit, acquire, switch rail.
                             } else if (semaphores.size() == 2 && semaphores.get(0).availablePermits() == 0) {
                                 Semaphore sem = semaphores.get(1);
                                 sem.acquire();
                                 if (switchCmd != null) {
                                     SwitchCmd.tryOtherDir(tsi, switchCmd.dir, switchCmd);
                                 }
-                                tsi.setSpeed(id, speed);
                                 semQueue.add(sem);
                             }
                     }
@@ -143,6 +143,7 @@ public class Lab1 {
             }
         }
 
+        // Uses opposite of standard directional map for given train to release semaphores.
         public void maybeRelease(Point sensPoint) {
 
             List<Semaphore> sems;
@@ -153,7 +154,7 @@ public class Lab1 {
             if (sems == null || sems.isEmpty() || semQueue.isEmpty()) {
                 return;
             }
-
+            // Crossroads handling, removes no matter placement in queue.
             if (sems.contains(semI)) {
                 if(semQueue.remove(semI)) {
                     semQueue.remove(semI);
@@ -163,7 +164,7 @@ public class Lab1 {
             }
 
             Semaphore relevantSem = semQueue.peek();
-
+            // Removes first semaphore in queue and releases.
             if (sems.contains(relevantSem)) {
                 semQueue.remove();
                 if(relevantSem != null) {
@@ -181,7 +182,7 @@ public class Lab1 {
             this.y = y;
             this.dir = dir;
         }
-
+        // Invert direction of switch.
         static void tryOtherDir(TSimInterface tsi, int dir, SwitchCmd switchCmd) throws CommandException {
             if (dir == 0x01) {
                 tsi.setSwitch(switchCmd.x, switchCmd.y, 0x02);
@@ -190,7 +191,7 @@ public class Lab1 {
             }
         }
     }
-
+    // Builder for maps, points and semaphores
     static class TrackBuilder {
 
         static void build(Map<Point, List<Semaphore>> downSemMap,
@@ -206,7 +207,7 @@ public class Lab1 {
             Semaphore semG = new Semaphore(1);
             Semaphore semH = new Semaphore(1);
 
-            // non-station ensors
+            // non-station sensors
             Point pointA1 = new Point(6, 7);
             Point pointA2 = new Point(10, 7);
             Point pointA3 = new Point(14, 7);
@@ -231,6 +232,9 @@ public class Lab1 {
 
             Point pointH1 = new Point(4, 13);
 
+            //What semaphores to use depending on direction of train:
+
+            // DOWN
             // branchA (17,7)
             downSemMap.put(pointB3, List.of(semC));
             downSemMap.put(pointA3, List.of(semC));
@@ -245,12 +249,18 @@ public class Lab1 {
             downSemMap.put(pointB1, List.of(semI));
             downSemMap.put(pointA1, List.of(semI));
 
+            // UP
+            // branchD (3,11)
             upSemMap.put(pointH1, List.of(semF));
             upSemMap.put(pointG1, List.of(semF));
+            // branchC (4,9)
             upSemMap.put(pointF1, List.of(semD, semE));
+            // branchB (15,9)
             upSemMap.put(pointD1, List.of(semC));
             upSemMap.put(pointE1, List.of(semC));
+            // branchA (17,7)
             upSemMap.put(pointC1, List.of(semA, semB));
+
             // crossroads
             upSemMap.put(pointB2, List.of(semI));
             upSemMap.put(pointA2, List.of(semI));
